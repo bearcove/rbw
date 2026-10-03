@@ -38,9 +38,7 @@ pub async fn webauthn(
                 }
             }
             Some(TokenEvent::EnumerationComplete) => {
-                log::info!(
-                    "rbw: connect a FIDO2 security key to continue"
-                );
+                log::info!("rbw: connect a FIDO2 security key to continue");
             }
             Some(TokenEvent::Removed(_)) => {}
             None => {
@@ -156,9 +154,9 @@ impl UiCallback for Ui {
             let _ = tx.send(res);
         });
         match rx.recv().ok()? {
-            Ok(pw) => std::str::from_utf8(pw.password())
-                .ok()
-                .map(str::to_string),
+            Ok(pw) => {
+                std::str::from_utf8(pw.password()).ok().map(str::to_string)
+            }
             Err(e) => {
                 log::warn!("webauthn: pinentry failed: {e}");
                 None

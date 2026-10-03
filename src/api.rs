@@ -363,9 +363,16 @@ struct ConnectErrorRes {
     // ignore it. Deserialized independently of `two_factor_providers` so
     // a server that only emits the legacy array (or a malformed challenge
     // shape) still drives the TOTP/Yubikey/Email paths correctly.
-    #[serde(default, rename = "TwoFactorProviders2", alias = "twoFactorProviders2")]
+    #[serde(
+        default,
+        rename = "TwoFactorProviders2",
+        alias = "twoFactorProviders2"
+    )]
     two_factor_providers_data: Option<
-        HashMap<TwoFactorProviderType, Option<PublicKeyCredentialRequestOptions>>,
+        HashMap<
+            TwoFactorProviderType,
+            Option<PublicKeyCredentialRequestOptions>,
+        >,
     >,
     #[serde(
         rename = "SsoEmail2faSessionToken",
@@ -767,6 +774,8 @@ struct SyncResPasswordHistory {
 
 #[derive(serde::Serialize, Debug)]
 struct CiphersPostReq {
+    #[serde(rename = "encryptedFor")]
+    encrypted_for: String,
     #[serde(rename = "type")]
     ty: u32, // XXX what are the valid types?
     #[serde(rename = "folderId")]
@@ -782,6 +791,8 @@ struct CiphersPostReq {
 
 #[derive(serde::Serialize, Debug)]
 struct CiphersPutReq {
+    #[serde(rename = "encryptedFor")]
+    encrypted_for: String,
     #[serde(rename = "type")]
     ty: u32, // XXX what are the valid types?
     #[serde(rename = "folderId")]
@@ -1212,6 +1223,32 @@ impl Client {
         }
     }
 
+    fn account_id(&self, access_token: &str) -> Result<String> {
+        #[derive(serde::Deserialize)]
+        struct AccountProfile {
+            #[serde(alias = "Id")]
+            id: String,
+        }
+        let client = reqwest::blocking::Client::new();
+        let profile_response = client
+            .get(self.api_url("/accounts/profile"))
+            .header("Authorization", format!("Bearer {access_token}"))
+            .send()
+            .map_err(|source| Error::Reqwest { source })?;
+        if profile_response.status() == reqwest::StatusCode::UNAUTHORIZED {
+            return Err(Error::RequestUnauthorized);
+        }
+        if !profile_response.status().is_success() {
+            return Err(Error::RequestFailed {
+                status: profile_response.status().as_u16(),
+            });
+        }
+        let profile: AccountProfile = profile_response
+            .json()
+            .map_err(|source| Error::Reqwest { source })?;
+        Ok(profile.id)
+    }
+
     pub fn add(
         &self,
         access_token: &str,
@@ -1220,7 +1257,9 @@ impl Client {
         notes: Option<&str>,
         folder_id: Option<&str>,
     ) -> Result<()> {
+        let encrypted_for = self.account_id(access_token)?;
         let mut req = CiphersPostReq {
+            encrypted_for,
             ty: 1,
             folder_id: folder_id.map(std::string::ToString::to_string),
             name: name.to_string(),
@@ -1348,6 +1387,7 @@ impl Client {
         history: &[crate::db::HistoryEntry],
     ) -> Result<()> {
         let mut req = CiphersPutReq {
+            encrypted_for: self.account_id(access_token)?,
             ty: match data {
                 crate::db::EntryData::Login { .. } => 1,
                 crate::db::EntryData::SecureNote => 2,
